@@ -237,7 +237,23 @@ def get_train_data_loader(
                 min_length_dict=data_cfg.get("min_length_dict", {}),
                 pack_into_one_sample=data_cfg.pack_sample_into_one,
             )
-
+    if gpc.config.data.sft_pack == 'v1':
+        from internlm.data.batch_sampler import DefaultSampler
+        rank = gpc.get_local_rank(ParallelMode.DATA)
+        world_size = gpc.get_world_size(ParallelMode.DATA)
+        sampler = DefaultSampler(
+            dataset=train_ds,
+            rank=rank,
+            world_size=world_size,
+            seed=1024,
+            round_up=True,
+        )
+        train_dl = DataLoader(
+            dataset=train_ds, sampler=sampler, num_workers=num_worker,
+            pin_memory=True, persistent_workers=num_worker > 0,
+            batch_size=data_cfg.micro_num,
+            collate_fn=partial(packed_collate_fn, packed_length=data_cfg.packed_length))
+        return train_dl, dataset_types
     if dataset_generate_func is None or not train_folder:
         # partition already completed
         assert isinstance(train_ds, (PackedDataset, PackedDatasetWithoutCuSeqlen, ConcatDataset))

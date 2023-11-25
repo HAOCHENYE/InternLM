@@ -1,7 +1,11 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
 
+import heapq
 import itertools as it
+from typing import List, Tuple
+import bisect
+import random
 import operator
 import os
 from copy import deepcopy
@@ -16,6 +20,7 @@ from internlm.core.context import global_context as gpc
 from internlm.data.single_dataset import JsonlDataset
 from internlm.data.utils import get_dataset_type_id
 from internlm.utils.logger import get_logger
+from .dataset import JsonlDataset
 
 DEFAULT_SEED = 1024
 logger = get_logger(__file__)
@@ -407,6 +412,11 @@ def get_packed_dataset_without_short_length(
 
                 if pack_into_one_sample:
                     ds = PackedDatasetWithoutCuSeqlen(ds, max_length_per_sample, packed_length)
+                elif gpc.config.data.sft_pack:
+                    if gpc.config.data.sft_pack == 'v1':
+                        ds = PackedSFTDatasetv1(ds, packed_length)
+                    else:
+                        ds = PackedSFTDataset(ds, max_length_per_sample, packed_length)
                 else:
                     ds = PackedDataset(ds, max_length_per_sample, packed_length)
 
@@ -422,3 +432,159 @@ def get_packed_dataset_without_short_length(
         )
 
     return dataset
+
+class PackedSFTDataset(PackedDataset):
+    def build_pack(self, item: int):
+        from bisect import bisect_left
+        start_left = bisect_left(self.acm_len_samples, self.packed_length * item)
+        pack, cu_seqlens, indexes, labels, type_ids = [], [0], [], [], []
+        cur_idx = start_left
+        while len(pack) + self.len_samples_shuffled[cur_idx] < self.packed_length:
+            sample_idx = self.sample_indices[cur_idx]
+            sample = self.dataset[sample_idx]
+            chunk = sample["tokens"]
+            pack.extend(chunk)
+            _labels = deepcopy(chunk)
+            _labels = list(_labels[1:]) + [-100]
+            assert len(_labels) == len(chunk), (_labels, chunk)
+            labels.extend(_labels)
+            type_ids.extend([sample.get("type_id", 0)] * len(chunk))
+            num_new_samples, tokens_left = divmod(len(chunk), self.max_length_per_sample)
+            for _ in range(num_new_samples):
+                cu_seqlens.append(cu_seqlens[-1] + self.max_length_per_sample)
+                indexes.extend(list(range(self.max_length_per_sample)))
+            if tokens_left > 0:
+                cu_seqlens.append(cu_seqlens[-1] + tokens_left)
+                indexes.extend(list(range(tokens_left)))
+            cur_idx += 1
+        
+        sample_idx = self.sample_indices[cur_idx]
+        sample = self.dataset[sample_idx]
+        chunk = sample["tokens"][:self.packed_length - len(pack)]
+        pack.extend(chunk)
+        _labels = deepcopy(chunk)
+        if len(sample["tokens"]) == self.packed_length - len(pack):
+            _labels = list(_labels[1:]) + [-100]
+        else:
+            _labels = list(_labels[1:]) + [sample["tokens"][self.packed_length - len(pack)]]
+        assert len(_labels) == len(chunk), (_labels, chunk)
+        labels.extend(_labels)
+        type_ids.extend([sample.get("type_id", 0)] * len(chunk))
+        num_new_samples, tokens_left = divmod(len(chunk), self.max_length_per_sample)
+        for _ in range(num_new_samples):
+            cu_seqlens.append(cu_seqlens[-1] + self.max_length_per_sample)
+            indexes.extend(list(range(self.max_length_per_sample)))
+        if tokens_left > 0:
+            cu_seqlens.append(cu_seqlens[-1] + tokens_left)
+            indexes.extend(list(range(tokens_left)))
+        out = {"tokens": pack, "cu_seqlens": cu_seqlens, "indexes": indexes, "labels": labels, "type_ids": type_ids}
+        return out
+    
+    def __getitem__(self, item: int) -> Dict:
+        """Given the index, it returns a dict as
+        {
+         'tokens': List[int],
+         'cu_seqlens': List[int],
+         'indexes': List[int], # denotes positional vector as 'tokens'
+         'labels': List[int], # corresponds to 'tokens' and shifted yet, -100 means skipping prediction
+        }
+        """
+
+        if gpc.config.model.use_flash_attn:
+            return self.build_pack(item)
+        return self.build_unpack(item)
+
+
+class Bucket:
+    def __init__(self, max_size) -> None:
+        self.max_size = max_size
+        self.idxs = []
+        self.lengths = []
+        self._length_sum = 0
+
+    def __lt__(self, other):
+        return self.length < other.length
+
+    @property
+    def length(self):
+        return self._length_sum
+
+    def __len__(self):
+        return len(self.idxs)
+
+    def append(self, idx, length):
+        if self._length_sum == self.max_size:
+            raise RuntimeError('bucket is full')
+        self.idxs.append(idx)
+        if self._length_sum + length > self.max_size:
+            # truncate
+            length = self.max_size - self._length_sum
+            self.lengths.append(length)
+            self._length_sum += length
+        else:
+            self.lengths.append(-1)
+            self._length_sum += length
+
+    def get_packed_data(self, dataset: JsonlDataset):
+        pack, cu_seqlens, indexes, labels, type_ids = [], [0], [], [], []
+        for idx, length in zip(self.idxs, self.lengths):
+            sample = dataset[idx]
+            chunk = sample["tokens"]
+            if length != -1:
+                label = chunk[1:length + 1]
+                chunk = chunk[:length]
+            else:
+                label = chunk[1:] + [-100]
+            pack.extend(chunk)
+            labels.extend(label)
+            cu_seqlens.append(cu_seqlens[-1] + len(chunk))
+            indexes.extend(list(range(len(chunk))))
+            type_ids.extend([sample.get("type_id", 0)] * len(chunk))
+        return {"tokens": pack, "cu_seqlens": cu_seqlens, "indexes": indexes, "labels": labels, "type_ids": type_ids}
+
+
+class PackedSFTDatasetv1:
+    def __init__(
+        self,
+        dataset: JsonlDataset,
+        packed_length: int = 8192,
+    ):
+        self.dataset = dataset
+        self.packed_length = packed_length
+        self.sorted_length = sorted(enumerate(self.dataset.lengths), key=lambda x: x[1], reverse=True)
+        self.buckets: List[Bucket] = self.build_buckets(self.sorted_length, packed_length)
+
+    def build_buckets(self, lengths_idxes: List[Tuple[int, int]], bucket_size):
+        buckets: List[Bucket] = []
+        for idx, length in lengths_idxes:
+            if not buckets or buckets[0].length + length > bucket_size:
+                bucket = Bucket(bucket_size)
+                if length > bucket_size:
+                    raise ValueError('array is too large to fit in a bucket')
+                bucket.append(idx, length)
+                heapq.heappush(buckets, bucket)
+            else:
+                smallest = heapq.heappop(buckets)
+                smallest.append(idx, length)
+                heapq.heappush(buckets, smallest)
+        for bucket in buckets:
+            while bucket_size != bucket.length:
+                repeated = random.choice(lengths_idxes)
+                bucket.append(repeated[0], repeated[1])
+        return buckets
+
+    def __len__(self):
+        return len(self.buckets)
+
+    def get_labels(self, data: List[int], length=None):
+        if length is None:
+            return data[1:] + [-100]
+        else:
+            return data[1: length + 1]
+
+    def __getitem__(self, index):
+        bucket = self.buckets[index]
+        result = bucket.get_packed_data(self.dataset)
+        # if len(result['tokens']) != self.packed_length or len(result['labels']) != self.packed_length or len(result['type_ids']) != self.packed_length or len(result['indexes']) != self.packed_length:
+        #     breakpoint()
+        return result
