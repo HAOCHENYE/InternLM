@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 
-class JsonlDataset(torch.utils.data.Dataset):
+class  JsonlDataset(torch.utils.data.Dataset):
     """
 
     JSONL format is expected to roughly follow that of The Pile.
