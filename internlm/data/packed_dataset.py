@@ -2,8 +2,9 @@
 # -*- encoding: utf-8 -*-
 
 import heapq
+from itertools import chain
 import itertools as it
-from typing import List, Tuple
+from typing import Iterable, List, Tuple
 import bisect
 import random
 import operator
@@ -13,7 +14,7 @@ from typing import Dict
 
 import numpy as np
 import torch
-from torch.utils.data import ConcatDataset
+from torch.utils.data import ConcatDataset, Dataset
 from tqdm import tqdm
 
 from internlm.core.context import global_context as gpc
@@ -415,6 +416,8 @@ def get_packed_dataset_without_short_length(
                 elif gpc.config.data.sft_pack:
                     if gpc.config.data.sft_pack == 'v1':
                         ds = PackedSFTDatasetv1(ds, packed_length)
+                    elif gpc.config.data.sft_pack == 'v2':
+                        ds = ds
                     else:
                         ds = PackedSFTDataset(ds, max_length_per_sample, packed_length)
                 else:
@@ -422,8 +425,10 @@ def get_packed_dataset_without_short_length(
 
                 num_token_in_folder += len(ds) * packed_length
                 datasets.append(ds)
-
-    dataset = ConcatDataset(datasets=datasets)
+    if gpc.config.data.sft_pack == 'v2':
+        dataset = PackConcatDataset(datasets=datasets, packed_length=packed_length)
+    else:
+        dataset = ConcatDataset(datasets=datasets)
     if gpc.is_rank_for_log():
         logger.info(
             f"Find `{len(datasets)}` datasets, \
@@ -432,6 +437,7 @@ def get_packed_dataset_without_short_length(
         )
 
     return dataset
+
 
 class PackedSFTDataset(PackedDataset):
     def build_pack(self, item: int):
@@ -585,6 +591,12 @@ class PackedSFTDatasetv1:
     def __getitem__(self, index):
         bucket = self.buckets[index]
         result = bucket.get_packed_data(self.dataset)
-        # if len(result['tokens']) != self.packed_length or len(result['labels']) != self.packed_length or len(result['type_ids']) != self.packed_length or len(result['indexes']) != self.packed_length:
-        #     breakpoint()
         return result
+
+
+class PackConcatDataset(PackedSFTDatasetv1):
+    def __init__(self, datasets: Iterable[JsonlDataset], packed_length: int) -> None:
+        sorted_lengths = np.concatenate([dataset.lengths for dataset in datasets])
+        self.sorted_length = sorted(enumerate(sorted_lengths), key=lambda x: x[1], reverse=True)
+        self.buckets = self.build_buckets(self.sorted_length, packed_length)
+        self.dataset = ConcatDataset(datasets)
