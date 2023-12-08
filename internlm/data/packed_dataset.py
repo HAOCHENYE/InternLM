@@ -98,6 +98,7 @@ class PackedDataset(torch.utils.data.Dataset):
 
     def build_pack(self, pre_pos: int, pre_token_id: int, pos: int, token_id: int):
         pack, cu_seqlens, indexes, labels, type_ids = [], [0], [], [], []
+        sample_indexes = []
 
         while pre_pos < pos:
             sample_idx = self.sample_indices[pre_pos]
@@ -118,8 +119,10 @@ class PackedDataset(torch.utils.data.Dataset):
                 indexes.extend(list(range(tokens_left)))
             pre_pos = pre_pos + 1
             pre_token_id = 0
+            sample_indexes.append(sample_idx)
 
         sample_idx = self.sample_indices[pos]
+        sample_indexes.append(sample_idx)
         sample = self.dataset[sample_idx]
         chunk = sample["tokens"][pre_token_id:token_id]  # fragement of a sample
         pack.extend(chunk)
@@ -141,7 +144,7 @@ class PackedDataset(torch.utils.data.Dataset):
             cu_seqlens.append(cu_seqlens[-1] + tokens_left)
             indexes.extend(list(range(tokens_left)))
 
-        out = {"tokens": pack, "cu_seqlens": cu_seqlens, "indexes": indexes, "labels": labels, "type_ids": type_ids}
+        out = {"tokens": pack, "cu_seqlens": cu_seqlens, "indexes": indexes, "labels": labels, "type_ids": type_ids, 'dataset_path': self.dataset.path, 'sample_indexes': sample_indexes}
         return out
 
     def cal_pos_unpack(self, index):

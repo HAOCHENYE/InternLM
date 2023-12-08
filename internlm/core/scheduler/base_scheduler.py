@@ -83,7 +83,7 @@ class BaseScheduler(ABC):
             )
 
     @staticmethod
-    def _call_engine_criterion(engine: Engine, outputs: Any, labels: Any):
+    def _call_engine_criterion(engine: Engine, outputs: Any, labels: Any, *, data=None):
         """Calls the engine's criterion with the given outputs and labels.
 
         Args:
@@ -99,12 +99,13 @@ class BaseScheduler(ABC):
         if isinstance(labels, torch.Tensor):
             labels = (labels,)
 
+        kwargs = {'data': data} if data is not None else {}
         if isinstance(outputs, (tuple, list)) and isinstance(labels, (tuple, list)):
-            return engine.criterion(*outputs, *labels)
+            return engine.criterion(*outputs, *labels, **kwargs)
         elif isinstance(outputs, (tuple, list)) and isinstance(labels, dict):
-            return engine.criterion(*outputs, **labels)
+            return engine.criterion(*outputs, **labels, **kwargs)
         elif isinstance(outputs, dict) and isinstance(labels, dict):
-            return engine.criterion(**outputs, **labels)
+            return engine.criterion(**outputs, **labels, **kwargs)
         elif isinstance(outputs, dict) and isinstance(labels, (list, tuple)):
             raise ValueError(f"Expected labels to be a dict when the model outputs are dict, but got {type(labels)}")
         else:

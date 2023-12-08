@@ -140,7 +140,8 @@ class NaiveAMPModel(nn.Module):
         if kwargs:
             for k, v in kwargs.items():
                 kwargs[k] = self._convert_to_fp16(v)
-
+        import inspect
+        kwargs = {k: kwargs[k] for k in inspect.signature(self.model.forward).parameters.keys() if k in kwargs}
         out = self.model(*args, **kwargs)
 
         if self._output_to_fp32:

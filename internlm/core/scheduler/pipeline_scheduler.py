@@ -5,7 +5,6 @@
 
 from contextlib import contextmanager
 from typing import Callable, List, Optional, Tuple, Union
-
 import torch.cuda
 import torch.distributed as dist
 
@@ -167,7 +166,6 @@ class PipelineScheduler(BaseScheduler):
             return engine(*data)
         elif isinstance(data, dict):
             stage_output = data.pop("stage_output", None)
-
             if stage_output is None:
                 return engine(**data)
             elif isinstance(stage_output, torch.Tensor):
@@ -282,7 +280,7 @@ class PipelineScheduler(BaseScheduler):
                 return_tensors.append((output_obj, label))
             if accum_loss is not None:
                 self._call_hooks("before_criterion", output_obj, label)
-                loss = self._call_engine_criterion(engine, output_obj, label)
+                loss = self._call_engine_criterion(engine, output_obj, label, data=data)
                 self._call_hooks("after_criterion", loss)
 
                 loss_reduced = loss / self.num_microbatches

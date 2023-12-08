@@ -54,7 +54,7 @@ def packed_collate_fn(batch, packed_length):
 
     assert xs.shape[1] == packed_length, (xs.shape[1], packed_length)
 
-    return {"input_ids": xs, "cu_seqlens": cu_seqlens, "indexes": indexes, "type_ids": ts}, ys
+    return {"input_ids": xs, "cu_seqlens": cu_seqlens, "indexes": indexes, "type_ids": ts, "dataset_path": [i["dataset_path"] for i in batch], "sample_indexes": [i["sample_indexes"] for i in batch]}, ys
 
 
 def jsonl_ds_collate_fn(batch, max_length_per_sample):

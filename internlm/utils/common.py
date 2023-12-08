@@ -50,8 +50,9 @@ def _move_tensor(element):
                     item[key] = value.to(get_current_device()).detach()
             elif isinstance(item, list):
                 for index, value in enumerate(item):
-                    assert not value.is_cuda, "elements are already on devices."
-                    item[index] = value.to(get_current_device()).detach()
+                    if isinstance(value, torch.Tensor):
+                        assert not value.is_cuda, "elements are already on devices."
+                        item[index] = value.to(get_current_device()).detach()
             elif torch.is_tensor(item):
                 if not item.is_cuda:
                     item = item.to(get_current_device()).detach()

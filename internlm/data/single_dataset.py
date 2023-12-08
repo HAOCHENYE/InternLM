@@ -6,6 +6,7 @@ A .bin file corresponds to a Dataset instance here.
 """
 
 import json
+import os.path as osp
 import mmap
 import os
 import threading
@@ -62,6 +63,7 @@ class JsonlDataset(torch.utils.data.Dataset):
         item = f.readline().decode("utf-8")
         try:
             item = json.loads(item)
+            item['dataset_name'] = self.dataset_name
             item["length"] = len(item["tokens"])  # add a length info
             item["type_id"] = self.type_id
         except Exception as err:
