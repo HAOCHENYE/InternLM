@@ -529,5 +529,4 @@ class BatchSampler(Sampler[List[int]]):
         self.__dict__.update(states)
 
     def copy(self):
-        return self.__class__(self.dataset, self.shuffle, self.seed,
-                              self.round_up)
+        return self.__class__(self.sampler, self.batch_size, self.drop_last)

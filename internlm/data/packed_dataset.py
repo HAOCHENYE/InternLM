@@ -413,8 +413,8 @@ def get_packed_dataset_without_short_length(
 
                 if pack_into_one_sample:
                     ds = PackedDatasetWithoutCuSeqlen(ds, max_length_per_sample, packed_length)
-                elif gpc.config.data.sft_pack:
-                    if gpc.config.data.sft_pack == 'v1':
+                elif gpc.config.data.get('sft_pack') is not None:
+                    if gpc.config.data.get('sft_pack') == 'v1':
                         ds = PackedSFTDatasetv1(ds, packed_length)
                     elif gpc.config.data.sft_pack == 'v2':
                         ds = ds
@@ -425,7 +425,7 @@ def get_packed_dataset_without_short_length(
 
                 num_token_in_folder += len(ds) * packed_length
                 datasets.append(ds)
-    if gpc.config.data.sft_pack == 'v2':
+    if gpc.config.data.get('sft_pack') is not None:
         dataset = PackConcatDataset(datasets=datasets, packed_length=packed_length)
     else:
         dataset = ConcatDataset(datasets=datasets)
@@ -532,7 +532,7 @@ class Bucket:
             self._length_sum += length
 
     def get_packed_data(self, dataset: JsonlDataset):
-        pack, cu_seqlens, indexes, labels, type_ids = [], [0], [], [], []
+        pack, cu_seqlens, indexes, labels, type_ids, sample_indexes, dataset_paths = [], [0], [], [], [], [], []
         for idx, length in zip(self.idxs, self.lengths):
             sample = dataset[idx]
             chunk = sample["tokens"]
@@ -546,7 +546,9 @@ class Bucket:
             cu_seqlens.append(cu_seqlens[-1] + len(chunk))
             indexes.extend(list(range(len(chunk))))
             type_ids.extend([sample.get("type_id", 0)] * len(chunk))
-        return {"tokens": pack, "cu_seqlens": cu_seqlens, "indexes": indexes, "labels": labels, "type_ids": type_ids}
+            sample_indexes.append(idx)
+            dataset_paths.append(sample['dataset_path'])
+        return {"tokens": pack, "cu_seqlens": cu_seqlens, "indexes": indexes, "labels": labels, "type_ids": type_ids, "sample_indexes": sample_indexes, "dataset_path": dataset_paths}
 
 
 class PackedSFTDatasetv1:
@@ -581,12 +583,6 @@ class PackedSFTDatasetv1:
 
     def __len__(self):
         return len(self.buckets)
-
-    def get_labels(self, data: List[int], length=None):
-        if length is None:
-            return data[1:] + [-100]
-        else:
-            return data[1: length + 1]
 
     def __getitem__(self, index):
         bucket = self.buckets[index]

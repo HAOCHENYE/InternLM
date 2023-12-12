@@ -63,9 +63,9 @@ class  JsonlDataset(torch.utils.data.Dataset):
         item = f.readline().decode("utf-8")
         try:
             item = json.loads(item)
-            item['dataset_name'] = self.dataset_name
             item["length"] = len(item["tokens"])  # add a length info
             item["type_id"] = self.type_id
+            item['dataset_path'] = self.path
         except Exception as err:
             raise json.decoder.JSONDecodeError(
                 doc=self.path,

@@ -10,35 +10,29 @@ import os
 import jsonlines
 
 
-analyze_loss = os.getenv('ANALYZE_LOSS')
-
-if analyze_loss is not None:
+def _save_loss_info(loss, dataset_path, sample_index):
     file_handlers = {}
     train_folder = os.path.join(os.getenv('TRAIN_FOLDER'), 'cn')
     ckpt_foler = os.getenv('SAVE_CKPT_FOLDER')
 
-    def _save_loss_info(data, loss):
-        save_root = os.path.join(ckpt_foler, 'analyze_loss')
-        dataset_path = data['dataset_path'][0]
-        sample_indexes = data['sample_indexes'][0]
-        rel_path = os.path.relpath(dataset_path, train_folder)
-        filename = os.path.splitext(os.path.basename(dataset_path))[0]
+    save_root = os.path.join(ckpt_foler, 'analyze_loss')
 
-        data_rank = gpc.get_local_rank(ParallelMode.DATA)
-        pipline_rank = gpc.get_local_rank(ParallelMode.PIPELINE)
+    rel_path = os.path.relpath(dataset_path, train_folder)
+    filename = os.path.splitext(os.path.basename(dataset_path))[0]
 
-        saved_path = os.path.join(save_root, rel_path, f'dp{data_rank}_pp{pipline_rank}', f'{filename}.jsonl')
-        if dataset_path not in file_handlers:
-            os.makedirs(os.path.dirname(saved_path), exist_ok=True)
-            file_handlers[dataset_path] = jsonlines.open(saved_path, mode='w', flush=True)
-        
-        data_world = gpc.get_world_size(ParallelMode.DATA)
-        cur_iter = data_world * int(os.environ['training_steps']) + data_rank
-        file_handlers[saved_path].write(
-            {'loss': loss.item(), 'index': [int(i) for i in sample_indexes], 'dataset_path': dataset_path, 'steps': cur_iter})
-else:
-    def _save_loss_info(*args, **kwargs):
-        pass
+    data_rank = gpc.get_local_rank(ParallelMode.DATA)
+    pipline_rank = gpc.get_local_rank(ParallelMode.PIPELINE)
+
+    saved_path = os.path.join(save_root, rel_path, f'dp{data_rank}_pp{pipline_rank}', f'{filename}.jsonl')
+
+    if saved_path not in file_handlers:
+        os.makedirs(os.path.dirname(saved_path), exist_ok=True)
+        file_handlers[saved_path] = jsonlines.open(saved_path, mode='w', flush=True)
+    
+    data_world = gpc.get_world_size(ParallelMode.DATA)
+    cur_iter = data_world * int(os.environ['training_steps']) + data_rank
+    file_handlers[saved_path].write(
+        {'loss': loss.item(), 'index': sample_index, 'dataset_path': dataset_path, 'steps': cur_iter})
 
 
 
@@ -80,9 +74,11 @@ class FlashGPTLMLoss(nn.Module):
             raise RuntimeError(f"The number of criterion inputs are:{len(args)}")
         shift_logits = logits.contiguous().view(-1, logits.size(-1))
         shift_labels = labels.contiguous().view(-1)
-        loss = self.loss_fn(
-            shift_logits, shift_labels
-        )  # There is no need to consider the ignore_index problem here, because the loss calculation will be
-        # calculated through the calculation range, and -100 must be outside this range, so there is no problem
-        _save_loss_info(data, loss)
+        if os.getenv('ANALYZE_LOSS') is not None:
+            loss = self.loss_fn(shift_logits, shift_labels)
+            _save_loss_info(data, loss)
+        else:
+            # There is no need to consider the ignore_index problem here, because the loss calculation will be
+            # calculated through the calculation range, and -100 must be outside this range, so there is no problem
+            loss = self.loss_fn(shift_logits, shift_labels)
         return loss

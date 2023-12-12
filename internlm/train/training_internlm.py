@@ -237,7 +237,7 @@ def get_train_data_loader(
                 min_length_dict=data_cfg.get("min_length_dict", {}),
                 pack_into_one_sample=data_cfg.pack_sample_into_one,
             )
-    if gpc.config.data.sft_pack in ('v1', 'v2'):
+    if gpc.config.data.get('sft_pack') in ('v1', 'v2'):
         from internlm.data.batch_sampler import DefaultSampler, BatchSampler
         rank = gpc.get_local_rank(ParallelMode.DATA)
         world_size = gpc.get_world_size(ParallelMode.DATA)
