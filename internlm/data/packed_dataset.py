@@ -387,6 +387,7 @@ def get_packed_dataset_without_short_length(
             logger.info(f"Reading {root}...")
         num_token_in_folder = 0
 
+        sft_pack = gpc.config.data.get('sft_pack')
         for fn in tqdm(sorted(files), total=len(files), leave=False, disable=not show_progress):
             if fn.endswith(".bin"):
                 fp = os.path.join(root, fn)
@@ -413,19 +414,19 @@ def get_packed_dataset_without_short_length(
 
                 if pack_into_one_sample:
                     ds = PackedDatasetWithoutCuSeqlen(ds, max_length_per_sample, packed_length)
-                elif gpc.config.data.get('sft_pack') is not None:
-                    if gpc.config.data.get('sft_pack') == 'v1':
+                elif sft_pack is not None:
+                    if sft_pack == 'v1':
                         ds = PackedSFTDatasetv1(ds, packed_length)
-                    elif gpc.config.data.sft_pack == 'v2':
+                    elif sft_pack == 'v2':
                         ds = ds
                     else:
-                        ds = PackedSFTDataset(ds, max_length_per_sample, packed_length)
+                        raise RuntimeError(f"Unknown sft_pack type {gpc.config.data.sft_pack}")
                 else:
                     ds = PackedDataset(ds, max_length_per_sample, packed_length)
 
                 num_token_in_folder += len(ds) * packed_length
                 datasets.append(ds)
-    if gpc.config.data.get('sft_pack') is not None:
+    if sft_pack == 'v2':
         dataset = PackConcatDataset(datasets=datasets, packed_length=packed_length)
     else:
         dataset = ConcatDataset(datasets=datasets)

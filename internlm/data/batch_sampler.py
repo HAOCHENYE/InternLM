@@ -397,7 +397,7 @@ class DefaultSampler(Sampler):
                  shuffle: bool = True,
                  seed: Optional[int] = None,
                  round_up: bool = True,
-                 divisor: int = 1) -> None:
+    ) -> None:
         self.rank = rank
         self.world_size = world_size
 
@@ -417,13 +417,16 @@ class DefaultSampler(Sampler):
                 (len(self.dataset) - rank) / world_size)
             self.total_size = len(self.dataset)
 
+        self.g = torch.Generator()
+        self.g.manual_seed(seed)
+        self.start = 0
+
     def __iter__(self) -> Iterator[int]:
         """Iterate the indices."""
+        self.rng_state = self.g.get_state()
         # deterministically shuffle based on epoch and seed
         if self.shuffle:
-            g = torch.Generator()
-            g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+            indices = torch.randperm(len(self.dataset), generator=self.g).tolist()
         else:
             indices = torch.arange(len(self.dataset)).tolist()
 
@@ -435,9 +438,12 @@ class DefaultSampler(Sampler):
 
         # subsample
         indices = indices[self.rank:self.total_size:self.world_size]
-
-        return iter(indices)
-
+        
+        for i in indices[self.start:]:
+            self.start += 1
+            yield i
+        self.start = 0
+        
     def __len__(self) -> int:
         """The number of samples in this rank."""
         return self.num_samples
@@ -453,6 +459,13 @@ class DefaultSampler(Sampler):
             epoch (int): Epoch number.
         """
         self.epoch = epoch
+    
+    def state_dict(self):
+        return {'rng_state': self.rng_state, 'start': self.start}
+    
+    def load_state_dict(self, state_dict):
+        self.g.set_state(state_dict['rng_state'])
+        self.start = state_dict['start']
 
 
 class BatchSampler(Sampler[List[int]]):
@@ -471,7 +484,7 @@ class BatchSampler(Sampler[List[int]]):
         [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
 
-    def __init__(self, sampler: Union[Sampler[int], Iterable[int]], batch_size: int, drop_last: bool) -> None:
+    def __init__(self, sampler: DefaultSampler, batch_size: int, drop_last: bool) -> None:
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.
@@ -522,11 +535,10 @@ class BatchSampler(Sampler[List[int]]):
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
 
     def state_dict(self):
-        # TODO
-        return self.__dict__
+        return self.sampler.state_dict()
 
-    def load_state_dict(self, states):
-        self.__dict__.update(states)
+    def load_state_dict(self, state_dict):
+        return self.sampler.load_state_dict(state_dict)
 
     def copy(self):
         return self.__class__(self.sampler, self.batch_size, self.drop_last)

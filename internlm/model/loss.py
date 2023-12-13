@@ -10,6 +10,7 @@ import os
 import jsonlines
 
 
+
 def _save_loss_info(loss, dataset_path, sample_index):
     file_handlers = {}
     train_folder = os.path.join(os.getenv('TRAIN_FOLDER'), 'cn')
@@ -75,7 +76,11 @@ class FlashGPTLMLoss(nn.Module):
         shift_logits = logits.contiguous().view(-1, logits.size(-1))
         shift_labels = labels.contiguous().view(-1)
         if os.getenv('ANALYZE_LOSS') is not None:
-            loss = self.loss_fn(shift_logits, shift_labels)
+            cu_seqlens = data['cu_seqlens']
+            losses = []
+            for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:]):
+                losses.append(self.loss_fn(shift_logits[start:end], shift_labels[start:end]))
+            loss = sum(losses) / len(losses)
             _save_loss_info(data, loss)
         else:
             # There is no need to consider the ignore_index problem here, because the loss calculation will be
