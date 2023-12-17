@@ -14,9 +14,12 @@ from internlm.core.context import global_context as gpc
 from internlm.core.engine import Engine
 from internlm.core.naive_amp import NaiveAMPModel
 from internlm.utils.common import get_current_device, move_to_device
+from internlm.utils.logger import get_logger
 from internlm.utils.timeout import llm_timeout
 
 from .base_scheduler import BaseScheduler, SchedulerHook
+
+logger = get_logger(__file__)
 
 
 def get_tensor_shape():
@@ -31,19 +34,19 @@ def get_tensor_shape():
             if gpc.config.parallel.sequence_parallel:
                 sequence_world_size = gpc.get_world_size(ParallelMode.TENSOR)
                 tensor_shape = (
-                    gpc.config.SEQ_LEN * gpc.config.data["micro_bsz"] // sequence_world_size,
-                    gpc.config.HIDDEN_SIZE,
+                    gpc.config.data["seq_len"] * gpc.config.data["micro_bsz"] // sequence_world_size,
+                    gpc.config.model["hidden_size"],
                 )
             else:
                 tensor_shape = (
-                    gpc.config.SEQ_LEN * gpc.config.data["micro_bsz"],
-                    gpc.config.HIDDEN_SIZE,
+                    gpc.config.data["seq_len"] * gpc.config.data["micro_bsz"],
+                    gpc.config.model["hidden_size"],
                 )
         else:
             tensor_shape = (
                 gpc.config.data["micro_bsz"],
-                gpc.config.SEQ_LEN,
-                gpc.config.HIDDEN_SIZE,
+                gpc.config.data["seq_len"],
+                gpc.config.model["hidden_size"],
             )
         return tensor_shape
     else:
@@ -182,17 +185,16 @@ class PipelineScheduler(BaseScheduler):
 
     def load_batch(self, engine, data_iter):
         # Pipeline schedule just puts data in memory
-        batch_data, batch_size = engine.load_batch(data_iter, to_gpu=False)
-        assert batch_size % self.num_microbatches == 0, "Batch size should divided by the number of microbatches"
+        batch_data, actual_batch_size = engine.load_batch(data_iter, to_gpu=False)
 
+        self.num_microbatches = actual_batch_size  # Rampup or variable bsz size.
         self.microbatch_offset = 0
-        self.batch_size = batch_size
+        self.batch_size = actual_batch_size
         self.batch_data, self.batch_label = batch_data
-        self.microbatch_size = self.batch_size // self.num_microbatches
 
     def load_micro_batch(self):
         micro_batch_data, micro_batch_label = self._load_micro_batch(
-            data=self.batch_data, label=self.batch_label, offset=self.microbatch_offset, micro_bsz=self.microbatch_size
+            data=self.batch_data, label=self.batch_label, offset=self.microbatch_offset
         )
         if self.data_process_func:
             micro_batch_data["input_ids"] = self.data_process_func(
@@ -204,7 +206,7 @@ class PipelineScheduler(BaseScheduler):
             micro_batch_data.pop("indexes")
 
         micro_batch_data["label"] = micro_batch_label
-        self.microbatch_offset += self.microbatch_size
+        self.microbatch_offset += 1
 
         return move_to_device(micro_batch_data)
 
@@ -783,10 +785,9 @@ class InterleavedPipelineScheduler(PipelineScheduler):
             data=self.batch_data,
             label=self.batch_label,
             offset=self.microbatch_offset[model_chunk_id],
-            micro_bsz=self.microbatch_size,
         )
         micro_batch_data["label"] = micro_batch_label
-        self.microbatch_offset[model_chunk_id] += self.microbatch_size
+        self.microbatch_offset[model_chunk_id] += 1
         return move_to_device(micro_batch_data)
 
     def _forward_step(self, engine, chunk_id):
@@ -975,11 +976,12 @@ class InterleavedPipelineScheduler(PipelineScheduler):
             if gpc.is_pipeline_last_stage():
                 output_obj = None
 
+            assert output_obj is None or output_obj.dtype == self.dtype
+
             # Send and receive tensors as appropriate (send tensors computed
             # in this iteration; receive tensors for next iteration).
             if k != (num_warmup_microsteps - 1) or not receive_extra_backward:
                 # Normal warm-up communication process, or no need to prepare backward input for the 1F1B stage
-                assert output_obj.dtype == self.dtype
                 input_obj = comm.send_forward_recv_forward(
                     output_obj,
                     input_shape,
@@ -991,7 +993,6 @@ class InterleavedPipelineScheduler(PipelineScheduler):
                 if self._communication_overlap:
                     # In this case, we should handle forward and backward communication separately, consistent with the
                     # overlap version of the 1F1B stage
-                    assert output_obj.dtype == self.dtype
                     input_obj = comm.send_forward_recv_forward(
                         output_obj,
                         input_shape,
@@ -1008,7 +1009,6 @@ class InterleavedPipelineScheduler(PipelineScheduler):
                 else:
                     # In this case, we should handle forward and backward communication together, consistent with the
                     # non-overlap version of the 1F1B stage
-                    assert output_obj.dtype == self.dtype
                     input_obj, output_obj_grad = comm.send_forward_backward_recv_forward_backward(
                         output_obj,
                         None,  # no backward grad to send
@@ -1080,6 +1080,7 @@ class InterleavedPipelineScheduler(PipelineScheduler):
                 else:
                     input_obj_shape = self._input_obj_shapes[next_forward_chunk_id]
 
+            assert output_obj is None or output_obj.dtype == self.dtype
             forward_async_communicator = comm.AsynCommunicator(
                 output_obj,
                 input_obj_shape,
@@ -1201,7 +1202,7 @@ class InterleavedPipelineScheduler(PipelineScheduler):
             output_shape = self._output_obj_shapes[next_backward_chunk_id] if recv_next else None
 
             # Communicate objs.
-            assert output_obj.dtype == self.dtype
+            assert output_obj is None or output_obj.dtype == self.dtype
             input_obj, output_obj_grad = comm.send_forward_backward_recv_forward_backward(
                 output_obj,
                 input_obj_grad,

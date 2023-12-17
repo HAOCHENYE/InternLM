@@ -44,8 +44,8 @@ ckpt = dict(
     oss_snapshot_freq=int(CHECKPOINT_EVERY / 2),  # snapshot ckpt save frequency.
 )
 
-TRAIN_FOLDER = "/path/to/dataset"
-VALID_FOLDER = "/path/to/dataset"
+TRAIN_FOLDER = None  # "/path/to/dataset"
+VALID_FOLDER = None  # "/path/to/dataset"
 data = dict(
     seq_len=SEQ_LEN,
     # micro_num means the number of micro_batch contained in one gradient update
@@ -59,12 +59,17 @@ data = dict(
     pack_sample_into_one=False,
     total_steps=50000,
     skip_batches="",
+    # rampup_batch_size (str): A string with three space-separated integers representing the
+    #       starting batch size, the increment, and the number of steps between
+    #       each increment. For example, "192 24 8" means that the batch size (micro_num)
+    #       starts at 192 and increases by 24 every 8 steps. Defaults to None.
+    #       (IMPORTANT): The interval step size is 'micro_bsz'.
     rampup_batch_size="",
     # Datasets with less than 50 rows will be discarded
     min_length=50,
-    # train_folder=TRAIN_FOLDER,
-    # valid_folder=VALID_FOLDER,
-    empty_cache_and_diag_interval=10,
+    train_folder=TRAIN_FOLDER,
+    valid_folder=VALID_FOLDER,
+    empty_cache_and_diag_interval=200,
     diag_outlier_ratio=1.1,
 )
 
@@ -169,5 +174,6 @@ monitor = dict(
         enable_feishu_alert=DO_ALERT,
         feishu_alert_address=None,  # feishu webhook to send alert message
         light_monitor_address=None,  # light_monitor address to send heartbeat
+        alert_file_path=f"llm_alter/{JOB_NAME}_alert.log",
     ),
 )
