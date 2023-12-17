@@ -156,8 +156,8 @@ def args_sanity_check():
 
     # Saving checkpoint args.
     if ckpt.enable_save_ckpt:
-        assert "checkpoint_every" in ckpt, "If enable save checkpoint, must give checkpoint_every in config.data!"
-        assert ckpt.checkpoint_every > 0
+        # assert "checkpoint_every" in ckpt, "If enable save checkpoint, must give checkpoint_every in config.data!"
+        # assert ckpt.checkpoint_every > 0
         assert "save_ckpt_folder" in ckpt, "If enable save checkpoint, must give save_ckpt_folder in config.data!"
 
         if "async_upload" not in ckpt:
@@ -203,7 +203,7 @@ def args_sanity_check():
         logger.info("+" * 15 + " Ckpt Info " + "+" * 15)  # pylint: disable=W1201
         logger.info(f"is enable save ckpt: {ckpt.enable_save_ckpt}")
         logger.info(f"save_ckpt_folder: {ckpt.save_ckpt_folder}")
-        logger.info(f"checkpoint_every: {ckpt.checkpoint_every}")
+        # logger.info(f"checkpoint_every: {ckpt.checkpoint_every}")
 
     # tensorboard writer config
     if "enable_tb" not in gpc.config:

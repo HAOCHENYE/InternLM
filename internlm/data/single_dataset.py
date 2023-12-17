@@ -66,6 +66,7 @@ class  JsonlDataset(torch.utils.data.Dataset):
             item["length"] = len(item["tokens"])  # add a length info
             item["type_id"] = self.type_id
             item['dataset_path'] = self.path
+            item['sample_index'] = idx
         except Exception as err:
             raise json.decoder.JSONDecodeError(
                 doc=self.path,

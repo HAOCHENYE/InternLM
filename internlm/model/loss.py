@@ -10,13 +10,11 @@ import os
 import jsonlines
 
 
+file_handlers = {}
 
-def _save_loss_info(loss, dataset_path, sample_index):
-    file_handlers = {}
+
+def _save_loss_info(save_root, loss, dataset_path, sample_index):
     train_folder = os.path.join(os.getenv('TRAIN_FOLDER'), 'cn')
-    ckpt_foler = os.getenv('SAVE_CKPT_FOLDER')
-
-    save_root = os.path.join(ckpt_foler, 'analyze_loss')
 
     rel_path = os.path.relpath(dataset_path, train_folder)
     filename = os.path.splitext(os.path.basename(dataset_path))[0]
@@ -75,13 +73,16 @@ class FlashGPTLMLoss(nn.Module):
             raise RuntimeError(f"The number of criterion inputs are:{len(args)}")
         shift_logits = logits.contiguous().view(-1, logits.size(-1))
         shift_labels = labels.contiguous().view(-1)
-        if os.getenv('ANALYZE_LOSS') is not None:
-            cu_seqlens = data['cu_seqlens']
+        if (save_root := os.getenv('ANALYZE_LOSS')) is not None:
+            cu_seqlens = data['cu_seqlens'][0]
+            dataset_paths = data['dataset_path'][0]
+            sample_indexes = data['sample_indexes'][0]
             losses = []
-            for start, end in zip(cu_seqlens[:-1], cu_seqlens[1:]):
-                losses.append(self.loss_fn(shift_logits[start:end], shift_labels[start:end]))
+            for start, end, dataset_path, sample_index in zip(cu_seqlens[:-1], cu_seqlens[1:], dataset_paths, sample_indexes):
+                loss = self.loss_fn(shift_logits[start:end], shift_labels[start:end])
+                _save_loss_info(save_root, loss, dataset_path, sample_index)
+                losses.append(loss)
             loss = sum(losses) / len(losses)
-            _save_loss_info(data, loss)
         else:
             # There is no need to consider the ignore_index problem here, because the loss calculation will be
             # calculated through the calculation range, and -100 must be outside this range, so there is no problem

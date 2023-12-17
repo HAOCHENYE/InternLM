@@ -537,6 +537,8 @@ class Bucket:
         for idx, length in zip(self.idxs, self.lengths):
             sample = dataset[idx]
             chunk = sample["tokens"]
+            sample_index = sample['sample_index']
+            sample_indexes.append(sample_index)
             if length != -1:
                 label = chunk[1:length + 1]
                 chunk = chunk[:length]
@@ -547,7 +549,6 @@ class Bucket:
             cu_seqlens.append(cu_seqlens[-1] + len(chunk))
             indexes.extend(list(range(len(chunk))))
             type_ids.extend([sample.get("type_id", 0)] * len(chunk))
-            sample_indexes.append(idx)
             dataset_paths.append(sample['dataset_path'])
         return {"tokens": pack, "cu_seqlens": cu_seqlens, "indexes": indexes, "labels": labels, "type_ids": type_ids, "sample_indexes": sample_indexes, "dataset_path": dataset_paths}
 
