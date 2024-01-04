@@ -360,7 +360,7 @@ Vs. self.num_samples: {self.num_samples}"
         copy_sampler.load_state_dict(self.state_dict())
         return copy_sampler
 
-@DATA_SAMPLERS.register_module()
+
 class DefaultSampler(Sampler):
     """The default data sampler for both distributed and non-distributed
     environment.
