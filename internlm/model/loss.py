@@ -15,7 +15,6 @@ file_handlers = {}
 
 def _save_loss_info(save_root, loss, dataset_path, sample_index):
     train_folder = os.path.join(os.getenv('TRAIN_FOLDER'), 'cn')
-
     rel_path = os.path.relpath(dataset_path, train_folder)
     filename = os.path.splitext(os.path.basename(dataset_path))[0]
 
@@ -31,7 +30,7 @@ def _save_loss_info(save_root, loss, dataset_path, sample_index):
     data_world = gpc.get_world_size(ParallelMode.DATA)
     cur_iter = data_world * int(os.environ['training_steps']) + data_rank
     file_handlers[saved_path].write(
-        {'loss': loss.item(), 'index': sample_index, 'dataset_path': dataset_path, 'steps': cur_iter})
+        {'loss': loss.item(), 'index': int(sample_index), 'dataset_path': dataset_path, 'steps': cur_iter})
 
 
 
@@ -74,9 +73,14 @@ class FlashGPTLMLoss(nn.Module):
         shift_logits = logits.contiguous().view(-1, logits.size(-1))
         shift_labels = labels.contiguous().view(-1)
         if (save_root := os.getenv('ANALYZE_LOSS')) is not None:
-            cu_seqlens = data['cu_seqlens'][0]
-            dataset_paths = data['dataset_path'][0]
-            sample_indexes = data['sample_indexes'][0]
+            if isinstance(data['cu_seqlens'][0], list):
+                cu_seqlens = data['cu_seqlens'][0]
+                dataset_paths = data['dataset_path'][0]
+                sample_indexes = data['sample_indexes'][0]
+            else:
+                cu_seqlens = data['cu_seqlens'].view(-1)
+                sample_indexes = data['sample_indexes'][0]
+                dataset_paths = data['dataset_path'][0]
             losses = []
             for start, end, dataset_path, sample_index in zip(cu_seqlens[:-1], cu_seqlens[1:], dataset_paths, sample_indexes):
                 loss = self.loss_fn(shift_logits[start:end], shift_labels[start:end])

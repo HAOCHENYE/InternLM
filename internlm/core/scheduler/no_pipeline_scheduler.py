@@ -118,7 +118,7 @@ class NonPipelineScheduler(BaseScheduler):
 
             if return_loss:
                 self._call_hooks("before_criterion", output, label)
-                loss = self._call_engine_criterion(engine, output, label)
+                loss = self._call_engine_criterion(engine, output, label, data=data)
                 self._call_hooks("after_criterion", loss)
                 moe_loss = (
                     sum(moe_losses) * gpc.config.loss.moe_loss_coeff
@@ -166,7 +166,6 @@ class NonPipelineScheduler(BaseScheduler):
         assert (
             forward_only or return_loss
         ), "The argument 'return_loss' has to be True when 'forward_only' is False, but got False."
-
         batch_data, actual_batch_size = engine.load_batch(data_iter)  # actual_batch_size is micro_num
 
         self._grad_accum_size = actual_batch_size  # Rampup or variable bsz size.
