@@ -78,12 +78,14 @@ class FlashGPTLMLoss(nn.Module):
                 dataset_paths = data['dataset_path'][0]
                 sample_indexes = data['sample_indexes'][0]
             else:
-                cu_seqlens = data['cu_seqlens'].view(-1)
+                cu_seqlens = data['cu_seqlens'][0]
                 sample_indexes = data['sample_indexes'][0]
                 dataset_paths = data['dataset_path'][0]
             losses = []
             for start, end, dataset_path, sample_index in zip(cu_seqlens[:-1], cu_seqlens[1:], dataset_paths, sample_indexes):
                 loss = self.loss_fn(shift_logits[start:end], shift_labels[start:end])
+                if (shift_labels[start:end] == -100).all():
+                    continue
                 _save_loss_info(save_root, loss, dataset_path, sample_index)
                 losses.append(loss)
             loss = sum(losses) / len(losses)
