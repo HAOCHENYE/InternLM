@@ -150,7 +150,7 @@ class HybridZeroOptimizer(BaseOptimizer):
             # if zero is used, expert dp group will use ParallelMode.EXPERT_DATA as the real zero mode
             zero_mode = (
                 ParallelMode.ZERO1
-                if param_group["dp_mode"] == gpc.get_world_size(ParallelMode.ZERO1) == 1 or ParallelMode.DATA
+                if gpc.get_world_size(ParallelMode.ZERO1) == 1 or param_group["dp_mode"] == ParallelMode.DATA
                 else ParallelMode.EXPERT_DATA
             )
             self._zero_local_rank.append(gpc.get_local_rank(zero_mode))
@@ -943,6 +943,14 @@ class HybridZeroOptimizer(BaseOptimizer):
         grad_scaler = states["grad_scaler"]
         self.grad_scaler.load_state_dict(grad_scaler)
         optim_states = states["base_optim_states"]
+
+        if gpc.config.get("only_load_lr", False):
+            if gpc.is_rank_for_log():
+                logger.info("Only load lr in param_groups, skip loading weights in optimizer...")
+            for pg1, pg2 in zip(self.optim.param_groups, optim_states["param_groups"]):
+                pg1["lr"] = pg2["lr"]
+            return
+
         self.optim.load_state_dict(optim_states)
 
         # load fp32 model weight.
